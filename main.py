@@ -13,6 +13,7 @@ class LanraragiSearch(Star):
         super().__init__(context)
         self.api_url = "http://192.168.31.1:3000/api"
         self.api_key = "123456"
+        self.external_url = "http://192.168.31.1:3000"
         self.temp_dir = tempfile.gettempdir()
 
     async def download_thumbnail(self, url, arcid):
@@ -59,7 +60,7 @@ class LanraragiSearch(Star):
             for item in results:
                 title = item.get("title", "无标题")
                 arcid = item["arcid"]
-                reader_url = f"https://写你外网访问的地址和端口:66/reader?id={arcid}"
+                reader_url = f"{self.external_url}/reader?id={arcid}"
                 
                 # 构建格式化的文本
                 message_text += f"{title}\n"  # 标题
