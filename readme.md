@@ -4,3 +4,5 @@
 - `api_url`：lanraragi的api地址
 - `api_key`：lanraragi的api密钥
 - `external_url`：lanraragi的外网访问地址
+
+![图片1](图片1.png)
