@@ -40,31 +40,91 @@ class LanraragiSearch(Star):
         if not valid_images:
             return None
 
-        # 计算拼接图片的大小
-        thumb_width = 200  # 缩略图宽度
-        thumb_height = 300  # 缩略图高度
+        # 设置统一的目标高度
+        target_height = 800  # 统一高度
         padding = 10  # 图片间距
         
+        # 计算每张图片按比例缩放后的宽度
+        scaled_widths = []
+        for img in valid_images:
+            # 获取原始尺寸
+            width, height = img.size
+            # 按高度等比例缩放
+            scaled_width = int((width * target_height) / height)
+            scaled_widths.append(scaled_width)
+        
+        # 计算总宽度（包含间距）
+        total_width = sum(scaled_widths) + (len(valid_images) - 1) * padding
+        
         # 创建新图片
-        total_width = (thumb_width + padding) * len(valid_images) - padding
-        total_height = thumb_height
-        combined_image = PILImage.new('RGB', (total_width, total_height), (255, 255, 255))
+        combined_image = PILImage.new('RGB', (total_width, target_height), (255, 255, 255))
 
         # 拼接图片
         x_offset = 0
-        for img in valid_images:
-            # 调整图片大小
+        for img, scaled_width in zip(valid_images, scaled_widths):
+            # 调整图片大小，保持比例
             img = img.convert('RGB')
-            img = img.resize((thumb_width, thumb_height), PILImage.Resampling.LANCZOS)
+            img = img.resize((scaled_width, target_height), PILImage.Resampling.LANCZOS)
             
             # 粘贴到新图片上
             combined_image.paste(img, (x_offset, 0))
-            x_offset += thumb_width + padding
+            x_offset += scaled_width + padding
+
+        # 添加随机色块以规避图片审查
+        self.add_random_blocks(combined_image)
 
         # 保存到临时文件
         temp_path = os.path.join(self.temp_dir, 'combined_thumbnails.jpg')
         combined_image.save(temp_path, 'JPEG')
         return temp_path
+        
+    def add_random_blocks(self, image):
+        """添加随机色块以规避图片审查"""
+        import random
+        from PIL import ImageDraw
+        
+        width, height = image.size
+        draw = ImageDraw.Draw(image)
+        
+        # 添加10-20个随机色块
+        num_blocks = random.randint(10, 20)
+        
+        for _ in range(num_blocks):
+            # 随机位置
+            x1 = random.randint(0, width - 1)
+            y1 = random.randint(0, height - 1)
+            
+            # 随机大小（较小，不影响观看）
+            block_width = random.randint(3, 8)
+            block_height = random.randint(3, 8)
+            
+            # 确保色块不超出图片边界
+            x2 = min(x1 + block_width, width - 1)
+            y2 = min(y1 + block_height, height - 1)
+            
+            # 随机颜色（半透明）
+            r = random.randint(0, 255)
+            g = random.randint(0, 255)
+            b = random.randint(0, 255)
+            alpha = random.randint(30, 100)  # 透明度
+            
+            # 绘制半透明色块
+            color = (r, g, b, alpha)
+            
+            # 获取原始像素
+            for x in range(x1, x2):
+                for y in range(y1, y2):
+                    if 0 <= x < width and 0 <= y < height:
+                        # 获取当前像素颜色
+                        current = image.getpixel((x, y))
+                        
+                        # 混合颜色（考虑透明度）
+                        new_r = int((current[0] * (255 - alpha) + r * alpha) / 255)
+                        new_g = int((current[1] * (255 - alpha) + g * alpha) / 255)
+                        new_b = int((current[2] * (255 - alpha) + b * alpha) / 255)
+                        
+                        # 设置新颜色
+                        image.putpixel((x, y), (new_r, new_g, new_b))
 
     @filter.command("ex")
     async def search(self, event: AstrMessageEvent):
