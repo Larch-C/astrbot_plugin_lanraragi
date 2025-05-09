@@ -1,14 +1,12 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-from astrbot.api.message_components import Image, Plain, Forward, Node
+from astrbot.api.message_components import Image, Plain
 import httpx
-import json
 import os
 import tempfile
 from PIL import Image as PILImage
 import io
-import asyncio
 
 @register("lanraragi", "LanraragiSearch", "Lanraragi 搜索插件", "1.2.0")
 class LanraragiSearch(Star):
