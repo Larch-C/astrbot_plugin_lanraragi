@@ -9,13 +9,15 @@ import tempfile
 from PIL import Image as PILImage
 import io
 
-@register("lanraragi", "LanraragiSearch", "Lanraragi 搜索插件", "1.0.0")
+@register("lanraragi", "LanraragiSearch", "Lanraragi 搜索插件", "1.2.0")
 class LanraragiSearch(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: dict):
+        # 使用配置信息，如果没有则使用默认值
         super().__init__(context)
-        self.api_url = "http://192.168.31.136:3000/api" #这里/api不要丢了
-        self.api_key = "123456"
-        self.external_url = "https://lanraragi.com:3000"
+        self.config = config
+        self.api_url = config.get('api_url')
+        self.api_key = config.get('api_key')
+        self.external_url = config.get('external_url')
         self.temp_dir = tempfile.gettempdir()
 
     async def download_thumbnail(self, url, arcid):

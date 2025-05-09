@@ -1,0 +1,17 @@
+{
+    "api_url": {
+        "description": "Lanraragi API地址",
+        "type": "string",
+        "default": "http://192.168.31.136:3000/api"
+    },
+    "api_key": {
+        "description": "Lanraragi API密钥",
+        "type": "string",
+        "default": "123456"
+    },
+    "external_url": {
+        "description": "Lanraragi 外网访问地址",
+        "type": "string",
+        "default": "https://lanraragi.com:3000"
+    }
+}
