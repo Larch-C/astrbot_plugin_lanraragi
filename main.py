@@ -2,12 +2,13 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Image, Plain, Forward, Node
-import requests
+import httpx
 import json
 import os
 import tempfile
 from PIL import Image as PILImage
 import io
+import asyncio
 
 @register("lanraragi", "LanraragiSearch", "Lanraragi 搜索插件", "1.2.0")
 class LanraragiSearch(Star):
@@ -19,11 +20,12 @@ class LanraragiSearch(Star):
         self.api_key = config.get('api_key')
         self.external_url = config.get('external_url')
         self.temp_dir = tempfile.gettempdir()
+        self.client = httpx.AsyncClient(timeout=30.0)  # 创建异步客户端
 
     async def download_thumbnail(self, url, arcid):
         try:
             headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-            response = requests.get(url, headers=headers)
+            response = await self.client.get(url, headers=headers)
             response.raise_for_status()
             
             # 将图片数据转换为PIL Image对象
@@ -141,7 +143,7 @@ class LanraragiSearch(Star):
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
 
         try:
-            response = requests.get(search_url, headers=headers)
+            response = await self.client.get(search_url, headers=headers)
             response.raise_for_status()
             
             search_result = response.json()
@@ -194,4 +196,6 @@ class LanraragiSearch(Star):
             yield event.plain_result(error_msg)
 
     async def terminate(self):
+        # 关闭异步客户端
+        await self.client.aclose()
         logger.info("Lanraragi 搜索插件已终止")
