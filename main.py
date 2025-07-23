@@ -7,6 +7,7 @@ import os
 import tempfile
 from PIL import Image as PILImage
 import io
+from datetime import datetime
 
 @register("lanraragi", "LanraragiSearch", "Lanraragi 搜索插件", "1.2.0")
 class LanraragiSearch(Star):
@@ -197,3 +198,74 @@ class LanraragiSearch(Star):
         # 关闭异步客户端
         await self.client.aclose()
         logger.info("Lanraragi 搜索插件已终止")
+
+    async def handle_ehentai_link(self, event: AstrMessageEvent):
+        import re
+        match = re.search(r'https://e[-x]hentai\.org/g/(\d+)/([0-9a-f]{10})', event.message_str)
+        if not match:
+            return
+        url, gid, token = match.group(0, 1, 2)
+        # 获取元数据
+        api_url = 'https://api.e-hentai.org/api.php'
+        data = {"method": "gdata", "gidlist": [[int(gid), token]], "namespace": 1}
+        try:
+            response = await self.client.post(api_url, json=data)
+            response.raise_for_status()
+            gdata = response.json()['gmetadata'][0]
+            title = gdata['title']
+            title_jpn = gdata['title_jpn']
+            category = gdata['category']
+            uploader = gdata['uploader']
+            posted = datetime.fromtimestamp(float(gdata['posted']))
+            filecount = gdata['filecount']
+            rating = gdata['rating']
+            translated_tags = self.translate_tags(gdata['tags'])
+            tags = ', '.join(translated_tags)
+            thumb_url = gdata['thumb']
+            # 下载封面
+            thumb_resp = await self.client.get(thumb_url)
+            thumb_resp.raise_for_status()
+            thumb_img = PILImage.open(io.BytesIO(thumb_resp.content))
+            # 保存临时文件
+            temp_path = os.path.join(self.temp_dir, 'ehentai_thumb.jpg')
+            thumb_img.save(temp_path, 'JPEG')
+            # 构建消息
+            message_text = f"📌 标题：{title}\n📙 日文标题：{title_jpn}\n📂 类型：{category}\n👤 上传者：{uploader}\n🕒 上传时间：{posted:%Y-%m-%d %H:%M}\n📄 页数：{filecount}\n⭐ 评分：{rating}\n🏷️ 标签：{tags}"
+            message_components = [Image(temp_path), Plain(message_text)]
+            yield MessageEventResult(message_components)
+        except Exception as e:
+            logger.error(f"处理 e-hentai 链接出错：{e}")
+            yield event.plain_result("处理链接出错")
+
+    def translate_tags(self, tags_list):
+        import json
+        db_path = '/AstrBot/data/plugins/astrbot_plugin_lanraragi/db.text.json'
+        with open(db_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        target = data['data']
+        translated = []
+        for item in tags_list:
+            parts = item.split(':', 1)
+            if len(parts) == 2:
+                namespace, key = parts
+            else:
+                translated.append(item)
+                continue
+            for element in target:
+                if element['namespace'] == namespace:
+                    ns_name = element['frontMatters']['name']
+                    translated_item = item.replace(namespace, ns_name, 1)
+                    data_dict = element.get('data', {})
+                    if key in data_dict:
+                        value = data_dict[key]['name']
+                        translated_item = translated_item.replace(key, value, 1)
+                    translated.append(translated_item)
+                    break
+            else:
+                translated.append(item)
+        return translated
+
+    @filter.regex(r'https://e[-x]hentai\.org/g/\d+/[0-9a-f]{10}')
+    async def message_handler(self, event: AstrMessageEvent):
+        async for result in self.handle_ehentai_link(event):
+            yield result
