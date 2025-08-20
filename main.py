@@ -354,8 +354,22 @@ class LanraragiSearch(Star):
         try:
             with open(cache_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            logger.info(f"从缓存加载数据: {gid}_{token}")
-            return data, str(cache_image_path)
+            
+            # 加载缓存图片并应用随机色块处理
+            try:
+                # 读取缓存的图片
+                cached_img = PILImage.open(cache_image_path)
+                # 应用随机色块处理
+                self.add_random_blocks(cached_img)
+                # 保存到临时文件而不是覆盖缓存
+                temp_path = os.path.join(self.temp_dir, f'ehentai_thumb_{gid}_{token}.jpg')
+                cached_img.save(temp_path, 'JPEG')
+                logger.info(f"从缓存加载数据并应用随机色块: {gid}_{token}")
+                return data, temp_path
+            except Exception as img_e:
+                logger.error(f"处理缓存图片失败: {img_e}")
+                # 如果图片处理失败，仍然返回原始缓存图片
+                return data, str(cache_image_path)
         except Exception as e:
             logger.error(f"加载缓存失败: {e}")
             return None, None
