@@ -7,9 +7,12 @@ import os
 import tempfile
 from PIL import Image as PILImage
 import io
-from datetime import datetime
+import json
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
 
-@register("lanraragi", "LanraragiSearch", "Lanraragi 搜索插件", "1.2.0")
+@register("lanraragi", "LanraragiSearch", "Lanraragi 搜索插件", "1.4.0")
 class LanraragiSearch(Star):
     def __init__(self, context: Context, config: dict):
         # 使用配置信息，如果没有则使用默认值
@@ -20,6 +23,11 @@ class LanraragiSearch(Star):
         self.external_url = config.get('external_url')
         self.temp_dir = tempfile.gettempdir()
         self.client = httpx.AsyncClient(timeout=30.0)  # 创建异步客户端
+        
+        # 缓存相关设置
+        self.cache_dir = Path('/AstrBot/data/plugins/astrbot_plugin_lanraragi/cache')
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_duration = timedelta(days=1)  # 缓存有效期为1天
 
     async def download_thumbnail(self, url, arcid):
         try:
@@ -201,17 +209,35 @@ class LanraragiSearch(Star):
 
     async def handle_ehentai_link(self, event: AstrMessageEvent):
         import re
+        logger.info(f"处理消息: {event.message_str}")
         match = re.search(r'https://e[-x]hentai\.org/g/(\d+)/([0-9a-f]{10})', event.message_str)
         if not match:
+            logger.info("未找到匹配的e-hentai链接")
             return
         url, gid, token = match.group(0, 1, 2)
-        # 获取元数据
+        logger.info(f"提取到链接信息: url={url}, gid={gid}, token={token}")
+        
+        # 检查缓存
+        cached_data, cached_image = self.load_from_cache(gid, token)
+        if cached_data and cached_image:
+            logger.info(f"使用缓存数据: {gid}_{token}")
+            # 构建消息
+            message_components = [Image(cached_image), Plain(cached_data['message_text'])]
+            yield MessageEventResult(message_components)
+            return
+            
+        # 缓存不存在或已过期，获取元数据
         api_url = 'https://api.e-hentai.org/api.php'
         data = {"method": "gdata", "gidlist": [[int(gid), token]], "namespace": 1}
         try:
+            logger.info(f"请求API: {api_url}, 数据: {data}")
             response = await self.client.post(api_url, json=data)
             response.raise_for_status()
-            gdata = response.json()['gmetadata'][0]
+            logger.info(f"API响应状态码: {response.status_code}")
+            json_data = response.json()
+            logger.info(f"API响应数据结构: {list(json_data.keys())}")
+            gdata = json_data['gmetadata'][0]
+            logger.info(f"获取到画廊元数据: {list(gdata.keys())}")
             title = gdata['title']
             title_jpn = gdata['title_jpn']
             category = gdata['category']
@@ -219,18 +245,39 @@ class LanraragiSearch(Star):
             posted = datetime.fromtimestamp(float(gdata['posted']))
             filecount = gdata['filecount']
             rating = gdata['rating']
+            logger.info(f"标签数据类型: {type(gdata['tags'])}, 内容: {gdata['tags'][:3]}...")
             translated_tags = self.translate_tags(gdata['tags'])
+            logger.info(f"翻译后标签: {translated_tags[:3]}...")
             tags = ', '.join(translated_tags)
             thumb_url = gdata['thumb']
+            logger.info(f"缩略图URL: {thumb_url}")
             # 下载封面
+            logger.info("开始下载缩略图")
             thumb_resp = await self.client.get(thumb_url)
             thumb_resp.raise_for_status()
+            logger.info("缩略图下载成功，开始处理图片")
             thumb_img = PILImage.open(io.BytesIO(thumb_resp.content))
             # 保存临时文件
+            self.add_random_blocks(thumb_img)
             temp_path = os.path.join(self.temp_dir, 'ehentai_thumb.jpg')
             thumb_img.save(temp_path, 'JPEG')
             # 构建消息
             message_text = f"📌 标题：{title}\n📙 日文标题：{title_jpn}\n📂 类型：{category}\n👤 上传者：{uploader}\n🕒 上传时间：{posted:%Y-%m-%d %H:%M}\n📄 页数：{filecount}\n⭐ 评分：{rating}\n🏷️ 标签：{tags}"
+            
+            # 保存到缓存
+            cache_data = {
+                'title': title,
+                'title_jpn': title_jpn,
+                'category': category,
+                'uploader': uploader,
+                'posted': gdata['posted'],
+                'filecount': filecount,
+                'rating': rating,
+                'tags': translated_tags,
+                'message_text': message_text
+            }
+            self.save_to_cache(gid, token, cache_data, temp_path)
+            
             message_components = [Image(temp_path), Plain(message_text)]
             yield MessageEventResult(message_components)
         except Exception as e:
@@ -264,6 +311,54 @@ class LanraragiSearch(Star):
             else:
                 translated.append(item)
         return translated
+        
+    def get_cache_path(self, gid, token):
+        """获取缓存文件路径"""
+        return self.cache_dir / f"{gid}_{token}.json"
+        
+    def get_cache_image_path(self, gid, token):
+        """获取缓存图片路径"""
+        return self.cache_dir / f"{gid}_{token}.jpg"
+        
+    def is_cache_valid(self, cache_path):
+        """检查缓存是否有效"""
+        if not cache_path.exists():
+            return False
+            
+        # 检查缓存是否过期
+        cache_time = datetime.fromtimestamp(cache_path.stat().st_mtime)
+        return datetime.now() - cache_time < self.cache_duration
+        
+    def save_to_cache(self, gid, token, data, image_path=None):
+        """保存数据到缓存"""
+        cache_path = self.get_cache_path(gid, token)
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
+            
+        # 如果有图片，也保存图片
+        if image_path:
+            cache_image_path = self.get_cache_image_path(gid, token)
+            import shutil
+            shutil.copy2(image_path, cache_image_path)
+            
+        logger.info(f"已保存缓存: {gid}_{token}")
+        
+    def load_from_cache(self, gid, token):
+        """从缓存加载数据"""
+        cache_path = self.get_cache_path(gid, token)
+        cache_image_path = self.get_cache_image_path(gid, token)
+        
+        if not self.is_cache_valid(cache_path) or not self.is_cache_valid(cache_image_path):
+            return None, None
+            
+        try:
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            logger.info(f"从缓存加载数据: {gid}_{token}")
+            return data, str(cache_image_path)
+        except Exception as e:
+            logger.error(f"加载缓存失败: {e}")
+            return None, None
 
     @filter.regex(r'https://e[-x]hentai\.org/g/\d+/[0-9a-f]{10}')
     async def message_handler(self, event: AstrMessageEvent):
